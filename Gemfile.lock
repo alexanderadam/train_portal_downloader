@@ -11,7 +11,7 @@ GEM
     mini_portile2 (2.8.8)
     mp3info (0.8.5)
       ruby-mp3info (>= 0.8.5)
-    nokogiri (1.18.1)
+    nokogiri (1.18.3)
       mini_portile2 (~> 2.8.2)
       racc (~> 1.4)
     parallel (1.26.3)
