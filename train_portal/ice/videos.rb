@@ -6,6 +6,10 @@ require 'stringex'
 require 'open-uri'
 require 'zip'
 
+if OpenSSL::SSL.const_defined?(:OP_IGNORE_UNEXPECTED_EOF)
+  OpenSSL::SSL::SSLContext::DEFAULT_PARAMS[:options] |= OpenSSL::SSL::OP_IGNORE_UNEXPECTED_EOF
+end
+
 module TrainPortal::Ice
   module Videos
     module_function
@@ -68,14 +72,16 @@ module TrainPortal::Ice
       # mpd_manifest = read_mpd_manifest(manifests.detect { |url| url.end_with?('manifest.mpd') })
       manifest_mpd_url = manifests.detect { |url| url.end_with?('manifest.mpd') }
 
-      file_name = full_path(file_name)
-      # yt_dlp(manifest_mpd_url, file_name)
-      file_name = Dir.glob("#{file_name}*.mp4").first
+      yt_dlp(manifest_mpd_url, full_path(file_name))
+      file_name = full_path(file_name, 'mp4')
       mp4decode(file_name, manifest_mpd_url)
       reencode(file_name)
   end
 
     def yt_dlp(download_url, file_name)
+      raise ArgumentError, 'file_name is required' if file_name.nil?
+      return if full_path(file_name, 'mp4') # file exists
+
       unless system('which yt-dlp > /dev/null 2>&1')
         raise "yt-dlp is not installed or not found in PATH"
       end
@@ -126,15 +132,18 @@ module TrainPortal::Ice
         mp4decrypt_path = File.join(tmp_dir, 'bin', 'mp4decrypt')
         download_mp4decrypt(mp4decrypt_path) unless File.exist?(mp4decrypt_path)
       end
-      binding.irb
 
-      # Extract the decryption key from the manifest.mpd
       manifest = Nokogiri::XML(URI.open(manifest_mpd_url).read)
-      key_id = manifest.at_xpath('//cenc:default_KID', 'cenc' => 'urn:mpeg:cenc:2013').content
-      pssh = manifest.at_xpath('//cenc:pssh', 'cenc' => 'urn:mpeg:cenc:2013').content
+      manifest.remove_namespaces!
+      video_definitions = manifest.css('AdaptationSet[contentType="video"]')
+      max_quality_video = video_definitions.max_by { |v| v['maxWidth'] }
+      crypto_parameters = max_quality_video.css('ContentProtection[default_KID]').first
+      key_id = crypto_parameters['default_KID']
+      crypto_mode = crypto_parameters['value']
+      scheme_id_uri = crypto_parameters['schemeIdUri']
+      pssh = max_quality_video.css('ContentProtection pssh').first.content
 
-      # Here you would need to implement the logic to derive the key from the pssh
-      # For now, we'll assume you have a method to get the key
+      binding.irb
       key = get_decryption_key(pssh)
 
       output_file = input_file.sub(/\.\w+$/, '_dec.mp4')
@@ -166,8 +175,14 @@ module TrainPortal::Ice
     def read_m3u8(url) = M3u8::Playlist.read(URI.open(url).read)
     def read_mpd_manifest(url) = Nokogiri::XML(URI.open(url).read)
     def sanitize_string(string) = string.to_url(force_downcase: false).gsub('-', '_')
-    def full_path(sub_path) = TrainPortal.download_directory(File.join('videos', sub_path))
     def tmp_dir = TrainPortal.download_directory('tmp')
+
+    def full_path(sub_path, extension = nil)
+      result = TrainPortal.download_directory(File.join('videos', sub_path))
+      return result if extension.nil?
+
+      Dir.glob("#{result}*.#{extension}").first
+    end
 
     def download_mp4decrypt(destination_path)
       puts 'downloading mp4decrypt'
@@ -188,7 +203,8 @@ module TrainPortal::Ice
       zip_path = File.join(tmp_dir, 'bento4.zip')
 
       File.open(zip_path, 'wb') do |file|
-        file.write(URI.open(bento_url).open(open_timeout: READ_TIMEOUT, read_timeout: READ_TIMEOUT).read)
+        uri = URI.parse(bento_url).open(open_timeout: READ_TIMEOUT, read_timeout: READ_TIMEOUT)
+        file.write(uri.read)
       end
 
       Zip::File.open(zip_path) do |zip_file|
