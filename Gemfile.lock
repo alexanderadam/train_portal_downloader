@@ -5,7 +5,7 @@ GEM
       public_suffix (>= 2.0.2, < 7.0)
     ast (2.4.2)
     did_you_mean (2.0.0)
-    json (2.9.1)
+    json (2.19.9)
     language_server-protocol (3.17.0.3)
     m3u8 (0.8.2)
     mini_portile2 (2.8.8)
